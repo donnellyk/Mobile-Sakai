@@ -1,0 +1,30 @@
+table, td, th{
+	border: 1px solid #000000;
+	border-collapse: collapse;
+	border-width: medium;
+}
+
+.cal_labels {
+	color: #990000;
+	background-color: #FFFFCC;
+	text-align: center;
+}
+
+.cal_day, .cal_blank, .cal_title {
+	text-align: center;	
+	background-color: #BF3636;
+	color: #FFFFCC;
+
+}
+
+
+.cal_assignment{
+	text-align: center;
+	background-color: #FFFFCC;
+	color: #990000;
+	
+}
+
+.cal_assignment a:link{
+    color: #BF3636;
+}
