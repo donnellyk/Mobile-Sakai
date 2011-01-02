@@ -1,0 +1,971 @@
+import java.util.*;
+import java.text.*;
+
+import org.apache.axis.AxisFault;
+import org.apache.axis.Constants;
+import org.apache.axis.MessageContext;
+import org.apache.commons.lang.StringUtils;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+import org.sakaiproject.authz.api.AuthzGroup;
+import org.sakaiproject.authz.api.Member;
+import org.sakaiproject.authz.api.Role;
+import org.sakaiproject.authz.api.AuthzGroupService;
+import org.sakaiproject.authz.api.SecurityService;
+import org.sakaiproject.calendar.api.Calendar;
+import org.sakaiproject.calendar.api.CalendarEdit;
+import org.sakaiproject.calendar.api.CalendarEvent;
+import org.sakaiproject.calendar.api.CalendarEventEdit;
+import org.sakaiproject.calendar.api.CalendarService;
+import org.sakaiproject.component.cover.ComponentManager;
+import org.sakaiproject.component.api.ServerConfigurationService;
+import org.sakaiproject.entity.api.ResourceProperties;
+import org.sakaiproject.entity.api.ResourcePropertiesEdit;
+import org.sakaiproject.event.api.UsageSession;
+import org.sakaiproject.event.api.EventTrackingService;
+import org.sakaiproject.event.api.UsageSessionService;
+import org.sakaiproject.exception.IdUnusedException;
+import org.sakaiproject.site.api.Group;
+import org.sakaiproject.site.api.Site;
+import org.sakaiproject.site.api.SitePage;
+import org.sakaiproject.site.api.ToolConfiguration;
+import org.sakaiproject.site.api.SiteService.SelectionType;
+import org.sakaiproject.site.api.SiteService.SortType;
+import org.sakaiproject.site.api.SiteService;
+import org.sakaiproject.tool.api.Session;
+import org.sakaiproject.tool.api.Tool;
+import org.sakaiproject.tool.api.ToolManager;
+import org.sakaiproject.tool.api.SessionManager;
+import org.sakaiproject.user.api.User;
+import org.sakaiproject.user.api.UserEdit;
+import org.sakaiproject.user.api.UserDirectoryService;
+import org.sakaiproject.util.FormattedText;
+import org.sakaiproject.util.Xml;
+
+
+//Stuff I added for our use - Kevin
+import org.sakaiproject.assignment.api.*;
+import org.sakaiproject.message.api.*;
+import org.sakaiproject.announcement.api.*;
+import org.sakaiproject.message.api.*;
+
+import org.sakaiproject.api.app.roster.*;
+import org.sakaiproject.section.api.coursemanagement.*;
+import org.sakaiproject.time.api.*;
+
+
+import org.w3c.dom.Attr;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+
+/**
+ *   SakaiScript.jws 
+ *   
+ *   A set of administrative web services for Sakai
+ * 
+ */
+
+public class SakaiMobileScriptC {
+
+	private static final Log LOG = LogFactory.getLog(SakaiMobileScriptC.class);
+
+	private static final String TOOL_CONFIG_FUNCTIONS = "functions.require";
+
+	private static final String ADMIN_SITE_REALM = "/site/!admin";
+
+	private AuthzGroupService authzGroupService;
+	private CalendarService calendarService;
+	private EventTrackingService eventTrackingService;
+	private SecurityService securityService;
+	private ServerConfigurationService serverConfigurationService;
+	private SessionManager sessionManager;
+	private SiteService siteService;
+	private ToolManager toolManager;
+	private UsageSessionService usageSessionService;
+	private UserDirectoryService userDirectoryService;
+
+	private RosterManager rosterManager;
+	private AssignmentService assignmentService;
+	private MessageService messageService;
+	private AnnouncementChannel annoucementChannel;
+	private AnnouncementService annoucementService;
+	
+	/**
+	 * Setup dependencies
+	 */
+	public SakaiMobileScriptC() {
+		authzGroupService = (AuthzGroupService) ComponentManager.get(AuthzGroupService.class.getName());
+		calendarService = (CalendarService) ComponentManager.get(CalendarService.class.getName());
+		eventTrackingService = (EventTrackingService) ComponentManager.get(EventTrackingService.class.getName());
+		securityService = (SecurityService) ComponentManager.get(SecurityService.class.getName());
+		serverConfigurationService = (ServerConfigurationService) ComponentManager.get(ServerConfigurationService.class.getName());
+		sessionManager = (SessionManager) ComponentManager.get(SessionManager.class.getName());
+		siteService = (SiteService) ComponentManager.get(SiteService.class.getName());
+		toolManager = (ToolManager) ComponentManager.get(ToolManager.class.getName());
+		usageSessionService = (UsageSessionService) ComponentManager.get(UsageSessionService.class.getName());
+		userDirectoryService = (UserDirectoryService) ComponentManager.get(UserDirectoryService.class.getName());
+
+		rosterManager = (RosterManager) ComponentManager.get(RosterManager.class.getName());
+		assignmentService = (AssignmentService) ComponentManager.get(AssignmentService.class.getName());
+		messageService = (MessageService) ComponentManager.get(MessageService.class.getName());
+		annoucementChannel = (AnnouncementChannel) ComponentManager.get(AnnouncementChannel.class.getName());
+		annoucementService = (AnnouncementService) ComponentManager.get(AnnouncementService.class.getName());
+	}
+	
+	/**
+	 * Get the Session related to the given sessionid
+	 * @param sessionid		the id of the session to retrieve
+	 * @return				the session, if it is active
+	 * @throws AxisFault	if session is inactive
+	 */
+	private Session establishSession(String sessionid) throws AxisFault 
+	{
+		Session s = sessionManager.getSession(sessionid);
+	
+		if (s == null)
+		{
+			throw new AxisFault("Session \""+sessionid+"\" is not active");
+		}
+		s.setActive();
+		sessionManager.setCurrentSession(s);
+		return s;
+	}
+	/**
+		 * Get a user's email address based on their session id
+		 *
+		 * @param	sessionid		the session id of the user who's email address you wish to retrieve
+		 * @return		        	the email address for the user
+		 * @throws	AxisFault
+		 *
+		 */
+		public String getUserEmail( String sessionid ) throws AxisFault
+		{
+			try {
+				Session session = establishSession(sessionid);
+			} catch (Exception e) {
+				return "false";
+			}
+			User user = userDirectoryService.getCurrentUser();
+			return user.getEmail();
+		}
+		
+		public String isValidSession(String sessionid) throws AxisFault
+		{
+			try {
+				Session session = establishSession(sessionid);
+				return "true";
+			} catch (Exception e) {  
+				return "false";
+			}
+		}
+		
+		/**
+		 * Gets the email address for a given user
+		 *
+		 * Differs from original above as that one uses the session to get the displayname hence you must know this in advance or be logged in to the web services
+		 * with that user. This uses a userid as well so we could be logged in as admin and retrieve the email address for any user.
+		 * 
+		 * @param	sessionid	the id of a valid session
+		 * @param	userid		the login username (ie jsmith26) of the user you want the email address for
+		 * @return				the email address for the user
+		 * @throws	AxisFault	
+		 *
+		 */
+		public String getUserEmail( String sessionid, String userid ) throws AxisFault
+		{
+			Session session = establishSession(sessionid);
+			try {
+				User user = userDirectoryService.getUserByEid(userid);
+				return user.getEmail();
+			} catch (Exception e) {  
+				LOG.error("WS getUserEmail() failed for user: " + userid + " : " + e.getClass().getName() + " : " + e.getMessage());
+				return "";
+			}
+		}
+	
+		/**
+		 * Get a user's display name based on their session id
+		 *
+		 * @param	sessionid		the session id of the user who's display name you wish to retrieve
+		 * @return		        	success or exception message
+		 * @throws	AxisFault
+		 *
+		 */
+		public String getUserDisplayName( String sessionid ) throws AxisFault
+		{
+			Session session = establishSession(sessionid);
+			User user = userDirectoryService.getCurrentUser();
+			return user.getDisplayName();
+		}
+	
+		/**
+		 * Gets the display name for a given user 
+		 *
+		 * Differs from original above as that one uses the session to get the displayname hence you must know this in advance or be logged in to the web services
+		 * with that user. This uses a userid as well so we could be logged in as admin and retrieve the display name for any user.
+		 * 
+		 * @param	sessionid	the id of a valid session
+		 * @param	userid		the login username (ie jsmith26) of the user you want the display name for
+		 * @return				the display name for the user
+		 * @throws	AxisFault	
+		 *
+		 */
+		public String getUserDisplayName( String sessionid, String userid ) throws AxisFault
+		{
+			Session session = establishSession(sessionid);
+			try {
+				User user = userDirectoryService.getUserByEid(userid);
+				return user.getDisplayName();
+			} catch (Exception e) {  
+				LOG.error("WS getUserDisplayName() failed for user: " + userid + " : " + e.getClass().getName() + " : " + e.getMessage());
+				return "";
+			}
+		}
+		/**
+		 * Return XML document listing all the data for a site
+		 *
+		 * @param 	sessionid 		the session id of a user who's list of sites you want to retrieve
+		 * @return					xml or an empty list <list/>. The return XML format is below:
+		 *<list>
+		 *	<item>
+		 *		<siteId>!admin</siteId>
+		 *		<siteTitle>Administration Workspace</siteTitle>
+		 *		<siteDesc>Blah Blah BLah</siteDesc>
+		 *	</item>
+		 *	<item>
+		 *		...
+		 *	</item>
+		 *	...
+		 *</list>
+		 *
+		 */
+		public String getSiteInfo(String sessionid, String classid) throws AxisFault
+		{
+				Session s = establishSession(sessionid);
+		
+				try 
+				{
+					Site site = siteService.getSite(classid);
+					Document dom = Xml.createDocument();
+					Node list = dom.createElement("list");
+					dom.appendChild(list);
+					
+					Node item = dom.createElement("item");
+					Node siteId = dom.createElement("siteId");
+					siteId.appendChild( dom.createTextNode(site.getId()) );
+					Node siteTitle = dom.createElement("siteTitle");
+					siteTitle.appendChild( dom.createTextNode(site.getTitle()) );
+					Node siteType = dom.createElement("siteType");
+					siteType.appendChild(dom.createTextNode(site.getType()));
+					Node siteDesc = dom.createElement("siteDesc");
+					siteDesc.appendChild(dom.createTextNode(site.getDescription()));
+					
+					item.appendChild(siteId);
+					item.appendChild(siteTitle);
+					item.appendChild(siteType);
+					item.appendChild(siteDesc);
+					list.appendChild(item);
+		
+					return Xml.writeDocumentToString(dom);
+				}
+				catch (Exception e) 
+				{
+					LOG.error("WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage());
+					return "<exception/>";
+				}
+			}
+		
+		
+		/**
+		 * Return XML document listing all sites user has read or write access based on their session id.
+		 *
+		 * @param 	sessionid 		the session id of a user who's list of sites you want to retrieve
+		 * @return					xml or an empty list <list/>. The return XML format is below:
+		 *<list>
+		 *	<item>
+		 *		<siteId>!admin</siteId>
+		 *		<siteTitle>Administration Workspace</siteTitle>
+		 *	</item>
+		 *	<item>
+		 *		...
+		 *	</item>
+		 *	...
+		 *</list>
+		 *
+		 */
+		public String getSitesUserCanAccess(String sessionid) throws AxisFault
+		{
+			Session s = establishSession(sessionid);
+	
+			try 
+			{
+				List allSites = siteService.getSites(SelectionType.ACCESS, null, null,
+						null, SortType.TITLE_ASC, null);
+				List moreSites = siteService.getSites(SelectionType.UPDATE, null, null,
+						null, SortType.TITLE_ASC, null);
+	
+				if ((allSites == null || moreSites == null) || (allSites.size() == 0 && moreSites.size() == 0)) {
+					return "<list/>";
+				}
+	
+				// Remove duplicates and combine two lists
+				allSites.removeAll( moreSites );
+				allSites.addAll( moreSites );
+	
+				Document dom = Xml.createDocument();
+				Node list = dom.createElement("list");
+				dom.appendChild(list);
+	
+				for (Iterator i = allSites.iterator(); i.hasNext();)
+				{
+					Site site = (Site)i.next();
+					Node item = dom.createElement("item");
+					Node siteId = dom.createElement("siteId");
+					siteId.appendChild( dom.createTextNode(site.getId()) );
+					Node siteTitle = dom.createElement("siteTitle");
+					siteTitle.appendChild( dom.createTextNode(site.getTitle()) );
+					Node siteType = dom.createElement("siteType");
+					siteType.appendChild(dom.createTextNode(site.getType()));
+					item.appendChild(siteId);
+					item.appendChild(siteTitle);
+					item.appendChild(siteType);
+					list.appendChild(item);
+				}
+	
+				return Xml.writeDocumentToString(dom);
+			}
+			catch (Exception e) 
+			{
+				LOG.error("WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage());
+				return "<exception/>";
+			}
+		}
+		
+		/**
+		 * Return string of instructor for a course
+		 *
+		 * @param 	sessionid 		the session id of a user who's list of sites you want to retrieve
+		 * @param	siteID			the id of the course 
+		 * @return					String
+		 */
+		public String getInstructorForCourse(String sessionid, String siteID) throws AxisFault {
+			Session s = establishSession(sessionid);
+			try {
+				siteID = "/site/" + siteID;
+				AuthzGroup azg = authzGroupService.getAuthzGroup(siteID);
+				
+				Document dom = Xml.createDocument();
+				Node list = dom.createElement("list");
+				dom.appendChild(list);
+				
+				for (Iterator i = azg.getUsers().iterator(); i.hasNext(); ) {
+					String id = (String) i.next();
+					try {
+						String role = azg.getUserRole(id).getId();
+						if (role.equals("maintain") || role.equals("Instructor")) {
+						
+							User user = userDirectoryService.getUser(id);
+							
+							//wrapping user node
+							Node userNode = dom.createElement("user");
+							
+							//id child node
+							Node userId = dom.createElement("id");
+							userId.appendChild(dom.createTextNode(user.getEid()));
+							
+							//name child node
+							Node userName = dom.createElement("name");
+							userName.appendChild(dom.createTextNode(user.getDisplayName()));
+							
+							//role child node
+							Node userRole = dom.createElement("role");						
+							userRole.appendChild(dom.createTextNode(role));
+							
+							//email child node
+							Node userEmail = dom.createElement("email");
+							String email = user.getEmail();
+							userEmail.appendChild(dom.createTextNode(email));
+							
+							//add all clicd nodes into the parent node
+							userNode.appendChild(userId);
+							userNode.appendChild(userName);
+							userNode.appendChild(userRole);
+							userNode.appendChild(userEmail);
+							list.appendChild(userNode);
+						}
+						
+					} catch (Exception e) {
+						//Exception with this user, log the error, skip this user and continue to the next
+						LOG.warn("WS getUsersInAuthzGroup(): error processing user " + id + " : " + e.getClass().getName() + " : " + e.getMessage());
+					}
+				}
+				return Xml.writeDocumentToString(dom);
+			}
+			catch (Exception e) {
+			    LOG.error("WS getUsersInAuthzGroup(): " + e.getClass().getName() + " : " + e.getMessage());
+				return "<exception/>";
+			}
+		}
+		
+		/**
+		 * Return XML document listing all assignments for a specific course
+		 *
+		 * @param 	sessionid 		the session id of a user who's list of sites you want to retrieve
+		 * @param 	classid 		the class id for the course we want the assignments for
+		 * @return					xml or an empty list <list/>. The return XML format is below:
+		 *<list>
+		 *	<as>
+		 *		<title>Homework 3</title>
+		 *		<due>12/21/2010</due>
+		 *	</as>
+		 *	<as>
+		 *		...
+		 *	</as>
+		 *	...
+		 *</list>
+		 *
+		 */
+		public String getAssignmentsForCourse(String sessionid, String classid) throws AxisFault {
+			Session s = establishSession(sessionid);
+			try 
+			{
+				Site site = siteService.getSite(classid);
+				Document dom = Xml.createDocument();
+				Node list = dom.createElement("list");
+				dom.appendChild(list);
+				
+				
+				//Might not be context, I don't actually know what a contect is...
+				List assignments = assignmentService.getListAssignmentsForContext(classid);
+					
+				for (int j = 0; j < assignments.size(); j++) {
+					Node as = dom.createElement("as");
+
+					Assignment current = (Assignment)assignments.get(j);
+					AssignmentContent content = current.getContent();
+					
+					
+					Node title = dom.createElement("title");
+					title.appendChild( dom.createTextNode(current.getTitle()) );
+					
+					Node instr = dom.createElement("instr");
+					instr.appendChild( dom.createTextNode(content.getInstructions()) );
+									
+					Node id = dom.createElement("id");
+					id.appendChild( dom.createTextNode(current.getContext()) );
+					Node due = dom.createElement("due");
+					Long tmp = new Long(current.getDueTime().getTime());
+					
+					Date dueDate = new Date(tmp);
+					DateFormat df = new SimpleDateFormat("MM/dd/yyyy");
+					
+					
+					due.appendChild( dom.createTextNode(df.format(dueDate))); //Milliseconds
+					
+					as.appendChild(title);
+					as.appendChild(due);
+					as.appendChild(id);
+					as.appendChild(instr);
+					list.appendChild(as);
+				}
+				return Xml.writeDocumentToString(dom);
+			}
+			catch (Exception e) 
+			{
+				LOG.error("WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage());
+				return "WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage();
+			}
+		}
+	
+		public String getAssignmentsForUser(String sessionid) throws AxisFault {
+			Session s = establishSession(sessionid);
+			try 
+			{
+				List allSites = siteService.getSites(SelectionType.ACCESS, null, null,
+						null, SortType.TITLE_ASC, null);
+				List moreSites = siteService.getSites(SelectionType.UPDATE, null, null,
+						null, SortType.TITLE_ASC, null);
+	
+				if ((allSites == null || moreSites == null) || (allSites.size() == 0 && moreSites.size() == 0)) {
+					return "<list/>";
+				}
+	
+				//Remove duplicates and combine two lists
+				allSites.removeAll( moreSites );
+				allSites.addAll( moreSites );
+	
+				Document dom = Xml.createDocument();
+				Node list = dom.createElement("list");
+				dom.appendChild(list);
+	
+				for (Iterator i = allSites.iterator(); i.hasNext();)
+				{
+					Site site = (Site)i.next();
+					
+					List assignments = assignmentService.getListAssignmentsForContext(site.getId());
+						
+					for (int j = 0; j < assignments.size(); j++) {
+						Node as = dom.createElement("as");
+						
+						Assignment current = (Assignment)assignments.get(j);
+						AssignmentContent content = current.getContent();
+						
+						
+						Node title = dom.createElement("title");
+						title.appendChild( dom.createTextNode(current.getTitle()) );
+						
+						Node instr = dom.createElement("instr");
+						instr.appendChild( dom.createTextNode(content.getInstructions()) );
+										
+						Node id = dom.createElement("id");
+						id.appendChild( dom.createTextNode(current.getContext()) );
+						Node due = dom.createElement("due");
+						Long tmp = new Long(current.getDueTime().getTime());
+						
+						Date dueDate = new Date(tmp);
+						DateFormat df = new SimpleDateFormat("MM/dd/yyyy");
+						
+						
+						due.appendChild( dom.createTextNode(df.format(dueDate))); //Milliseconds
+						
+						as.appendChild(title);
+						as.appendChild(due);
+						as.appendChild(id);
+						as.appendChild(instr);
+						list.appendChild(as);
+					}
+					
+				}
+	 				return Xml.writeDocumentToString(dom);
+			}
+			catch (Exception e) 
+			{
+				LOG.error("WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage());
+				return "WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage();
+			}
+		}
+		
+		/**
+		 * Return XML document listing all participants for a specific course
+		 *
+		 * @param 	sessionid 		the session id of a user who's list of sites you want to retrieve
+		 * @param 	classid 		the class id for the course we want the assignments for
+		 * @return					xml or an empty list <list/>. The return XML format is below:
+		 *<list>
+		 *	<user>
+		 *		<fname>John</fname>
+		 *		<lname>Doe</lname>
+		 *		<email>JD@muohio.edu</email>
+		 *	</user>
+		 *	<user>
+		 *		...
+		 *	</user>
+		 *	...
+		 *</list>
+		 *
+		 */
+		public String getUsersInSite(String sessionid, String siteID) throws AxisFault {
+			
+			Session s = establishSession(sessionid);
+			/*
+			if (ADMIN_SITE_REALM.equalsIgnoreCase(authzgroupid) && !securityService.isSuperUser(s.getUserId())) {
+				LOG.warn("WS getUsersInAuthzGroup(): Permission denied. Restricted to super users.");
+				throw new AxisFault("WS getUsersInAuthzGroup(): Permission denied. Restricted to super users.");
+			}
+			*/
+			try {
+				siteID = "/site/" + siteID;
+				AuthzGroup azg = authzGroupService.getAuthzGroup(siteID);
+				
+				Document dom = Xml.createDocument();
+				Node list = dom.createElement("list");
+				dom.appendChild(list);
+				
+				for (Iterator i = azg.getUsers().iterator(); i.hasNext(); ) {
+					String id = (String) i.next();
+					try {
+						User user = userDirectoryService.getUser(id);
+						
+						//wrapping user node
+						Node userNode = dom.createElement("user");
+						
+						//id child node
+						Node userId = dom.createElement("id");
+						userId.appendChild(dom.createTextNode(user.getEid()));
+						
+						//name child node
+						Node userName = dom.createElement("name");
+						userName.appendChild(dom.createTextNode(user.getDisplayName()));
+						
+						//role child node
+						Node userRole = dom.createElement("role");
+						String role = azg.getUserRole(id).getId();
+						userRole.appendChild(dom.createTextNode(role));
+						
+						//type child node
+						Node type = dom.createElement("type");
+						type.appendChild(dom.createTextNode(user.getType()));
+						
+						
+						//email child node
+						Node userEmail = dom.createElement("email");
+						String email = user.getEmail();
+						userEmail.appendChild(dom.createTextNode(email));
+						
+						//add all clicd nodes into the parent node
+						userNode.appendChild(userId);
+						userNode.appendChild(userName);
+						userNode.appendChild(userRole);
+						userNode.appendChild(userEmail);
+						userNode.appendChild(type);
+						list.appendChild(userNode);
+						
+					} catch (Exception e) {
+						//Exception with this user, log the error, skip this user and continue to the next
+						LOG.warn("WS getUsersInAuthzGroup(): error processing user " + id + " : " + e.getClass().getName() + " : " + e.getMessage());
+					}
+				}
+				return Xml.writeDocumentToString(dom);
+			}
+			catch (Exception e) {
+		        LOG.error("WS getUsersInAuthzGroup(): " + e.getClass().getName() + " : " + e.getMessage());
+				return "<exception/>";
+			}
+		}
+		
+		
+		/**
+		 * Return XML document listing all sites of type "course"
+		 *
+		 * @param 	sessionid 		the session id of a user who's list of sites you want to retrieve
+		 * @param 	classid 		the class id for the course we want the assignments for
+		 * @return					xml or an empty list <list/>. The return XML format is below:
+		 *<list>
+		 *	<item>
+		 *		<siteId>213</siteId>
+		 *		<siteTitle>CSE 217</siteTitle>
+		 *	</item>
+		 *	<item>
+		 *		...
+		 *	</item>
+		 *	...
+		 *</list>
+		 *
+		 */
+		public String getCoursesUserCanAccess(String sessionid) throws AxisFault
+		{
+			Session s = establishSession(sessionid);
+			
+					try 
+					{
+						List allSites = siteService.getSites(SelectionType.ACCESS, null, null,
+								null, SortType.TITLE_ASC, null);
+						List moreSites = siteService.getSites(SelectionType.UPDATE, null, null,
+								null, SortType.TITLE_ASC, null);
+			
+						if ((allSites == null || moreSites == null) || (allSites.size() == 0 && moreSites.size() == 0)) {
+							return "<list/>";
+						}
+			
+						// Remove duplicates and combine two lists
+						allSites.removeAll( moreSites );
+						allSites.addAll( moreSites );
+			
+						Document dom = Xml.createDocument();
+						Node list = dom.createElement("list");
+						dom.appendChild(list);
+			
+						for (Iterator i = allSites.iterator(); i.hasNext();)
+						{
+							Site site = (Site)i.next();
+							if (site.getType() != null && site.getType().equals("course")) {
+								Node item = dom.createElement("item");
+								Node siteId = dom.createElement("siteId");
+								siteId.appendChild( dom.createTextNode(site.getId()) );
+								Node siteTitle = dom.createElement("siteTitle");
+								siteTitle.appendChild( dom.createTextNode(site.getTitle()) );
+								Node siteType = dom.createElement("siteType");
+								siteType.appendChild(dom.createTextNode(site.getType()));
+								item.appendChild(siteId);
+								item.appendChild(siteTitle);
+								item.appendChild(siteType);
+								list.appendChild(item);
+							}
+						}
+			
+						return Xml.writeDocumentToString(dom);
+					}
+					catch (Exception e) 
+					{
+						LOG.error("WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage());
+						return "WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage();
+					}
+			
+		}
+		
+		/**
+		 * Return XML document listing all calendar events for all sites user can access
+		 *
+		 * @param 	sessionid 		the session id of a user who's list of sites you want to retrieve
+		 * @return					xml or an empty list <list/>. The return XML format is below:
+		 *<list>
+		 *	<event>
+		 *		<desc>Come raise money!</desc>
+		 *		<title>Some fundraiser</title>
+		 *		<time>?!</time>
+		 *	</event>
+		 *	<event>
+		 *		...
+		 *	</event>
+		 *	...
+		 *</list>
+		 *
+		 */
+		public String getCalendarForUserSites(String sessionid) throws AxisFault
+		{
+			Session s = establishSession(sessionid);
+	
+			try 
+			{
+				List allSites = siteService.getSites(SelectionType.ACCESS, null, null,
+						null, SortType.TITLE_ASC, null);
+				List moreSites = siteService.getSites(SelectionType.UPDATE, null, null,
+						null, SortType.TITLE_ASC, null);
+	
+				if ((allSites == null || moreSites == null) || (allSites.size() == 0 && moreSites.size() == 0)) {
+					return "<list/>";
+				}
+	
+				// Remove duplicates and combine two lists
+				allSites.removeAll( moreSites );
+				allSites.addAll( moreSites );
+	
+				Document dom = Xml.createDocument();
+				Node list = dom.createElement("list");
+				dom.appendChild(list);
+	
+				for (Iterator i = allSites.iterator(); i.hasNext();)
+				{
+					Site site = (Site)i.next();
+					String calId1 = "/calendar/calendar/"+site.getId()+"/main"; 
+					Calendar current = calendarService.getCalendar(calId1);
+	
+					List events = current.getEvents(null, null);
+					for (Iterator j = events.iterator(); j.hasNext();) {
+						CalendarEvent calEvent = (CalendarEvent)j.next();
+						Node event = dom.createElement("event");
+						Node desc = dom.createElement("desc");
+						Node title = dom.createElement("title");
+						Node time = dom.createElement("time");
+	
+						desc.appendChild( dom.createTextNode(calEvent.getDescription()));
+						title.appendChild( dom.createTextNode(calEvent.getDisplayName()) );
+						TimeRange range = calEvent.getRange();
+						time.appendChild( dom.createTextNode(range.toStringHR()) );
+	
+	
+						event.appendChild(desc);
+						event.appendChild(title);
+						event.appendChild(time);
+						list.appendChild(event);
+	
+					}
+				}
+	
+				return Xml.writeDocumentToString(dom);
+			}
+			catch (Exception e) 
+			{
+				LOG.error("WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage());
+				return "<exception/>";
+			}
+		}
+		/**
+		 * Return XML document listing all calendar events for specific site
+		 *
+		 * @param 	sessionid 		the session id of a user who's list of sites you want to retrieve
+		 * @param	siteid			id for specific class we want the calendar for
+		 * @return					xml or an empty list <list/>. The return XML format is below:
+		 *<list>
+		 *	<event>
+		 *		<desc>Come raise money!</desc>
+		 *		<title>Some fundraiser</title>
+		 *		<time>?!</time>
+		 *	</event>
+		 *	<event>
+		 *		...
+		 *	</event>
+		 *	...
+		 *</list>
+		 *
+		 */
+		public String getCalendarForSite(String sessionid, String siteID) throws AxisFault
+		{
+			Session s = establishSession(sessionid);
+	
+			try 
+			{
+	
+				Document dom = Xml.createDocument();
+				Node list = dom.createElement("list");
+				dom.appendChild(list);
+	
+				String calId1 = "/calendar/calendar/"+siteID+"/main"; 
+				Calendar current = calendarService.getCalendar(calId1);
+	
+				List events = current.getEvents(null, null);
+				for (Iterator j = events.iterator(); j.hasNext();) {
+					CalendarEvent calEvent = (CalendarEvent)j.next();
+					Node event = dom.createElement("event");
+					Node desc = dom.createElement("desc");
+					Node title = dom.createElement("title");
+					Node time = dom.createElement("time");
+	
+					desc.appendChild( dom.createTextNode(calEvent.getDescription()) );
+					title.appendChild( dom.createTextNode(calEvent.getDisplayName()) );
+					TimeRange range = calEvent.getRange();
+					time.appendChild( dom.createTextNode(range.toStringHR()) );
+	
+	
+					event.appendChild(desc);
+					event.appendChild(title);
+					event.appendChild(time);
+					list.appendChild(event);
+	
+				}
+	
+				return Xml.writeDocumentToString(dom);
+			}
+			catch (Exception e) 
+			{
+				LOG.error("WS getSitesUserCanAccess(): " + e.getClass().getName() + " : " + e.getMessage());
+				return "<exception/>";
+			}
+		}	
+	
+		/** 
+		 * Get a site's title 
+		 * 
+		 * @param	sessionid	the id of a valid session
+		 * @param	siteid		the id of the site you want the title of 
+		 * @return				title of the site or string containing error 
+		 * @throws AxisFault 
+		 * 
+		 */ 
+		public String getSiteTitle(String sessionid, String siteid) throws AxisFault { 
+	
+			Session s = establishSession(sessionid); 
+	
+			String siteTitle = ""; 
+	
+			try { 
+				Site site = siteService.getSite(siteid); 
+				siteTitle = site.getTitle(); 
+			} 
+			catch (Exception e) { 
+				LOG.error("WS getSiteTitle(): " + e.getClass().getName() + " : " + e.getMessage());
+				return e.getClass().getName() + " : " + e.getMessage(); 
+			} 
+	
+			return siteTitle; 
+		}
+	
+		/** 
+		 * Get a site's description 
+		 * 
+		 * @param	sessionid	the id of a valid session
+		 * @param	siteid		the id of the site you want the description of 
+		 * @return				description of the site or string containing error 
+		 * @throws	AxisFault 
+		 * 
+		 */ 
+		public String getSiteDescription(String sessionid, String siteid) throws AxisFault { 
+	
+			Session s = establishSession(sessionid); 
+	
+			String siteDescription = ""; 
+	
+			try { 
+				Site site = siteService.getSite(siteid); 
+				siteDescription = site.getDescription(); 
+			} 
+			catch (Exception e) { 
+				LOG.error("WS getSiteDescription(): " + e.getClass().getName() + " : " + e.getMessage());
+				return e.getClass().getName() + " : " + e.getMessage(); 
+			} 
+	
+			return siteDescription; 
+		}
+	
+	
+		/**
+		 * Creates and returns the session ID for a given user. 
+		 *
+		 * The sessionid argument must be a valid session for a super user ONLY otherwise it will fail.
+		 * The userid argument must be the EID (ie jsmith) of a valid user.
+		 * This new sessionid can then be used with getSitesUserCanAccess() to get the sites for the given user.
+		 * 
+		 * @param	sessionid	the sessionid of a valid session for a super user
+		 * @param	userid		the eid of the user you want to create a session for
+		 * @return				the sessionid for the user specified
+		 * @throws	AxisFault	if any data is missing,
+		 * 						not super user, 
+		 * 						or session cannot be established
+		 */
+	
+		public String getSessionForUser(String sessionid, String userid) throws AxisFault
+		{
+	
+			Session session = establishSession(sessionid);
+	
+			//check that ONLY super user's are accessing this	
+			if(!securityService.isSuperUser(session.getUserId())) {
+				LOG.warn("WS getSessionForUser(): Permission denied. Restricted to super users.");
+				throw new AxisFault("WS getSessionForUser(): Permission denied. Restricted to super users.");
+			}
+	
+			try {
+	
+				//check for empty userid
+				if (StringUtils.isBlank(userid)) {
+					LOG.warn("WS getSessionForUser() failed. Param userid empty.");
+					throw new AxisFault("WS failed. Param userid empty.");
+				}
+	
+				//get ip address for establishing session
+				MessageContext messageContext = MessageContext.getCurrentContext(); 
+				String ipAddress = messageContext.getStrProp(Constants.MC_REMOTE_ADDR);
+	
+				//start a new session
+				Session newsession = sessionManager.startSession();
+				sessionManager.setCurrentSession(newsession);
+	
+				//inject this session with new user values
+				User user = userDirectoryService.getUserByEid(userid);
+				newsession.setUserEid(userid);
+				newsession.setUserId(user.getId());
+	
+				//register the session with presence
+				UsageSession usagesession = usageSessionService.startSession(user.getId(),ipAddress,"SakaiScript.jws getSessionForUser()");
+	
+				// update the user's externally provided realm definitions
+				authzGroupService.refreshUser(user.getId());
+	
+				// post the login event
+				eventTrackingService.post(eventTrackingService.newEvent("user.login", null, true));
+	
+				if (newsession == null){
+					LOG.warn("WS getSessionForUser() failed. Unable to establish session for userid=" + userid + ", ipAddress=" + ipAddress);
+					throw new AxisFault("WS failed. Unable to establish session");
+				} else {
+					LOG.warn("WS getSessionForUser() OK. Established session for userid=" + userid + ", session=" + newsession.getId() + ", ipAddress=" + ipAddress);
+					return newsession.getId();
+				}
+			}
+			catch (Exception e) {  
+				return e.getClass().getName() + " : " + e.getMessage();
+			}
+	
+		}
+}
